@@ -1,14 +1,19 @@
 import React from 'react';
 
-function PortfolioOverview({ selectedPeriod, onPeriodChange }) {
+function PortfolioOverview({ selectedPeriod, onPeriodChange, portfolioData }) {
   const periods = ['1D', '1W', '1M', '3M', '1Y'];
   
-  const portfolioData = {
-    totalValue: 34800.00,
-    dayChange: 1250.00,
-    dayChangePercent: 3.72,
-    isPositive: true
+  // Use real portfolio data if provided, otherwise use defaults
+  const data = portfolioData || {
+    totalValue: 0,
+    holdingsCount: 0,
+    uploadDate: null
   };
+  
+  // Calculate mock daily change for demo (in real app, this would come from market data)
+  const dayChange = data.totalValue * 0.02; // 2% change for demo
+  const dayChangePercent = 2.0;
+  const isPositive = true;
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
@@ -36,25 +41,34 @@ function PortfolioOverview({ selectedPeriod, onPeriodChange }) {
         <div>
           <div className="text-sm text-gray-500 mb-1">Total Value</div>
           <div className="text-3xl font-bold text-gray-900">
-            ${portfolioData.totalValue.toLocaleString()}
+            ${data.totalValue.toLocaleString()}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">
+            {data.holdingsCount} holdings
           </div>
         </div>
         
         <div>
           <div className="text-sm text-gray-500 mb-1">Today's Change</div>
           <div className={`text-2xl font-semibold ${
-            portfolioData.isPositive ? 'text-green-600' : 'text-red-600'
+            isPositive ? 'text-green-600' : 'text-red-600'
           }`}>
-            {portfolioData.isPositive ? '+' : ''}${portfolioData.dayChange.toLocaleString()}
+            {isPositive ? '+' : ''}${dayChange.toLocaleString()}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">
+            Demo data
           </div>
         </div>
         
         <div>
           <div className="text-sm text-gray-500 mb-1">Change %</div>
           <div className={`text-2xl font-semibold ${
-            portfolioData.isPositive ? 'text-green-600' : 'text-red-600'
+            isPositive ? 'text-green-600' : 'text-red-600'
           }`}>
-            {portfolioData.isPositive ? '+' : ''}{portfolioData.dayChangePercent}%
+            {isPositive ? '+' : ''}{dayChangePercent}%
+          </div>
+          <div className="text-xs text-gray-400 mt-1">
+            Uploaded: {data.uploadDate ? new Date(data.uploadDate).toLocaleDateString() : 'Unknown'}
           </div>
         </div>
       </div>

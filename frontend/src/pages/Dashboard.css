@@ -104,6 +104,38 @@
   background-color: #fef2f2;
 }
 
+.bg-yellow-50 {
+  background-color: #fefce8;
+}
+
+.bg-yellow-200 {
+  background-color: #fde047;
+}
+
+.bg-yellow-500 {
+  background-color: #eab308;
+}
+
+.bg-yellow-600 {
+  background-color: #ca8a04;
+}
+
+.text-yellow-400 {
+  color: #facc15;
+}
+
+.text-yellow-700 {
+  color: #a16207;
+}
+
+.text-yellow-800 {
+  color: #854d0e;
+}
+
+.border-yellow-200 {
+  border-color: #fde047;
+}
+
 /* Text colors */
 .text-white {
   color: #ffffff;
@@ -457,8 +489,21 @@
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .animate-bounce {
   animation: bounce 1s infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
 /* Custom utilities */
