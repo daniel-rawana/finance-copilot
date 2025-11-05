@@ -3,6 +3,10 @@ from flask import Flask
 from flask_cors import CORS
 from routes.api_routes import api_bp
 from config import Config
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def create_app():
     app = Flask(__name__)
