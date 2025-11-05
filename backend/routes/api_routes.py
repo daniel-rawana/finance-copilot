@@ -2,9 +2,17 @@ import os
 import logging
 from flask import Blueprint, jsonify, request, current_app
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
 from utils.csv_parser import parse_portfolio_csv
 from utils.database import insert_portfolio, insert_holdings, get_portfolio_by_id, get_holdings_by_portfolio, get_portfolio_summary
 from utils.file_utils import allowed_file
+
+# Ensure environment variables are loaded
+# Try loading from backend directory first, then project root
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(backend_dir)
+load_dotenv(os.path.join(backend_dir, '.env'))  # Try backend/.env first
+load_dotenv(os.path.join(project_root, '.env'))  # Then try project root .env
 from utils.advisor_prompt import generate_advisor_prompt
 
 from utils.finance_functions import (
@@ -272,28 +280,43 @@ def get_advice():
     Generate investment advice using portfolio data and a user question.
     Expects JSON body: { "portfolio_id": int, "question": string }
     """
+    logger.info("=" * 80)
+    logger.info("ADVICE ENDPOINT CALLED - Starting request processing")
+    logger.info("=" * 80)
+    
     try:
+        # Step 1: Parse request
+        logger.info("STEP 1: Parsing request payload")
         payload = request.get_json(silent=True) or {}
         portfolio_id = payload.get('portfolio_id')
         question = (payload.get('question') or '').strip()
+        logger.info(f"  - portfolio_id: {portfolio_id} (type: {type(portfolio_id)})")
+        logger.info(f"  - question: '{question}'")
 
         if not portfolio_id or not isinstance(portfolio_id, int):
-            logger.warning("/advice called without valid portfolio_id")
+            logger.warning("  ❌ Invalid portfolio_id")
             return jsonify({"advice": None, "error": "Invalid or missing portfolio_id"}), 400
 
         if not question:
-            logger.warning("/advice called without question")
+            logger.warning("  ❌ Missing question")
             return jsonify({"advice": None, "error": "Question is required"}), 400
 
-        # Fetch portfolio and holdings
+        logger.info("  ✓ Request validation passed")
+
+        # Step 2: Fetch portfolio data
+        logger.info("STEP 2: Fetching portfolio data from database")
         portfolio = get_portfolio_by_id(portfolio_id)
         if not portfolio:
-            logger.warning(f"Portfolio {portfolio_id} not found for advice")
+            logger.warning(f"  ❌ Portfolio {portfolio_id} not found")
             return jsonify({"advice": None, "error": "Portfolio not found"}), 404
 
-        holdings_rows = get_holdings_by_portfolio(portfolio_id)
+        logger.info(f"  ✓ Portfolio found: {portfolio.get('file_name')}")
 
-        # Map DB rows to advisor prompt holdings schema
+        holdings_rows = get_holdings_by_portfolio(portfolio_id)
+        logger.info(f"  ✓ Retrieved {len(holdings_rows)} holdings")
+
+        # Step 3: Prepare portfolio data
+        logger.info("STEP 3: Preparing portfolio data for advisor prompt")
         holdings = []
         for h in holdings_rows:
             shares = h.get('shares') or 0
@@ -309,51 +332,141 @@ def get_advice():
             })
 
         portfolio_data = { 'holdings': holdings }
+        logger.info(f"  ✓ Prepared {len(holdings)} holdings for prompt generation")
 
+        # Step 4: Generate prompt
+        logger.info("STEP 4: Generating advisor prompt")
         prompt = generate_advisor_prompt(portfolio_data, question)
+        logger.info(f"  ✓ Prompt generated (length: {len(prompt)} characters)")
+        logger.debug(f"  Prompt preview: {prompt[:200]}...")
 
-        # Call OpenAI API (fallback to simulated response if not configured)
+        # Step 5: Check environment variables
+        logger.info("STEP 5: Checking OpenAI API configuration")
+        logger.info("  Checking environment variables...")
+        
+        # Check all possible env var sources
+        api_key_env = os.getenv('OPENAI_API_KEY')
+        api_key_from_environ = os.environ.get('OPENAI_API_KEY')
+        
+        logger.info(f"  - os.getenv('OPENAI_API_KEY'): {'SET' if api_key_env else 'NOT SET'}")
+        logger.info(f"  - os.environ.get('OPENAI_API_KEY'): {'SET' if api_key_from_environ else 'NOT SET'}")
+        
+        # Check .env file locations
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        project_root = os.path.dirname(backend_dir)
+        env_backend = os.path.join(backend_dir, '.env')
+        env_root = os.path.join(project_root, '.env')
+        
+        logger.info(f"  Checking .env file locations:")
+        logger.info(f"    - {env_backend}: {'EXISTS' if os.path.exists(env_backend) else 'NOT FOUND'}")
+        logger.info(f"    - {env_root}: {'EXISTS' if os.path.exists(env_root) else 'NOT FOUND'}")
+        
+        # Get API key
+        api_key = api_key_env or api_key_from_environ
+        
+        if api_key:
+            logger.info(f"  ✓ OPENAI_API_KEY found in environment")
+            logger.info(f"    - Key prefix: {api_key[:10]}...")
+            logger.info(f"    - Key length: {len(api_key)} characters")
+            logger.info(f"    - Key starts with 'sk-': {api_key.startswith('sk-')}")
+        else:
+            logger.warning("  ❌ OPENAI_API_KEY is NOT set in environment variables")
+            logger.warning("  This means the API will fall back to simulated responses")
+            logger.warning("  To fix: Create backend/.env file with: OPENAI_API_KEY=sk-your-key-here")
+
+        # Step 6: Attempt OpenAI API call
         advice_text = None
         openai_error = None
-        try:
-            import os as _os
-            api_key = _os.getenv('OPENAI_API_KEY')
-            if not api_key:
-                raise RuntimeError('OPENAI_API_KEY not set')
-
+        
+        if api_key:
+            logger.info("STEP 6: Attempting OpenAI API call")
             try:
-                import openai
-                openai.api_key = api_key
-                # Prefer ChatCompletion; fallback handled by exception
-                chat = openai.ChatCompletion.create(
+                logger.info("  Importing OpenAI library...")
+                from openai import OpenAI
+                logger.info("  ✓ OpenAI library imported successfully")
+                
+                logger.info("  Initializing OpenAI client...")
+                client = OpenAI(api_key=api_key)
+                logger.info("  ✓ OpenAI client initialized")
+                
+                logger.info("  Preparing API request...")
+                logger.info(f"    - Model: gpt-3.5-turbo")
+                logger.info(f"    - Prompt length: {len(prompt)} characters")
+                logger.info(f"    - Temperature: 0.3")
+                logger.info(f"    - Max tokens: 500")
+                
+                logger.info("  Making API call to OpenAI...")
+                response = client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[
-                        {"role": "system", "content": "You are a helpful financial investment advisor. Provide clear, concise, and prudent guidance."},
+                        {"role": "system", "content": "You are a helpful financial investment advisor. Provide clear, concise, and prudent guidance based on the user's portfolio data."},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.3,
+                    max_tokens=500,
                 )
-                advice_text = chat.choices[0].message["content"].strip()
+                
+                logger.info("  ✓ API call successful!")
+                logger.info(f"    - Response ID: {response.id}")
+                logger.info(f"    - Model used: {response.model}")
+                logger.info(f"    - Tokens used: {response.usage.total_tokens if hasattr(response, 'usage') else 'N/A'}")
+                
+                advice_text = response.choices[0].message.content.strip()
+                logger.info(f"  ✓ Advice extracted (length: {len(advice_text)} characters)")
+                logger.info("  ✓ SUCCESS: Real OpenAI API response received")
+                
+            except ImportError as ie:
+                openai_error = f"OpenAI library not installed: {str(ie)}"
+                logger.error(f"  ❌ IMPORT ERROR: {openai_error}")
+                logger.error("  To fix: Run: pip install openai")
+                logger.exception("Full import error traceback:")
+                
             except Exception as oe:
                 openai_error = str(oe)
-                logger.warning(f"OpenAI API call failed: {openai_error}")
-        except Exception as cfg_e:
-            openai_error = str(cfg_e)
-            logger.info(f"OpenAI not configured, using simulated advice: {openai_error}")
+                logger.error(f"  ❌ API CALL FAILED: {openai_error}")
+                logger.error(f"    Error type: {type(oe).__name__}")
+                logger.exception("Full API error traceback:")
+        else:
+            openai_error = "OPENAI_API_KEY not set in environment variables"
+            logger.warning(f"  ⚠️ SKIPPING OpenAI API call: {openai_error}")
 
+        # Step 7: Handle response
+        logger.info("STEP 7: Preparing final response")
         if not advice_text:
-            # Simulated lightweight advisor response using the generated prompt context
+            logger.warning("  ⚠️ No advice_text from OpenAI, using simulated response")
+            logger.warning(f"    Reason: {openai_error if openai_error else 'Unknown'}")
+            
             advice_text = (
                 "This is a simulated advisory response. "
                 "Key points from your portfolio were summarized, and prudent, diversified investing, risk tolerance alignment, "
                 "and periodic rebalancing are recommended. "
-                f"Prompt context: {prompt}"
+                f"Prompt context: {prompt[:200]}..."
             )
+            
+            logger.info("  Returning simulated response with error information")
+            logger.info("=" * 80)
+            logger.info("REQUEST COMPLETE: Returning simulated response")
+            logger.info("=" * 80)
+            
+            return jsonify({
+                "advice": advice_text, 
+                "error": openai_error if openai_error else "OpenAI API not configured"
+            }), 200
 
+        logger.info("  ✓ Returning real OpenAI API response")
+        logger.info("=" * 80)
+        logger.info("REQUEST COMPLETE: Returning real OpenAI API response")
+        logger.info("=" * 80)
+        
         return jsonify({"advice": advice_text, "error": None}), 200
 
     except Exception as e:
-        logger.error(f"Advice generation failed: {str(e)}")
+        logger.error("=" * 80)
+        logger.error("FATAL ERROR in advice endpoint")
+        logger.error("=" * 80)
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.exception("Full error traceback:")
         return jsonify({"advice": None, "error": f"Advice generation failed: {str(e)}"}), 500
 
 @api_bp.errorhandler(413)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function AdvisorChat() {
+function AdvisorChat({ portfolioId }) {
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -11,6 +11,7 @@ function AdvisorChat() {
   ]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
@@ -23,20 +24,54 @@ function AdvisorChat() {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const question = inputText;
     setInputText('');
     setIsTyping(true);
+    setError(null);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      // Call the backend API
+      const response = await fetch('http://127.0.0.1:5000/api/advice', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          portfolio_id: portfolioId,
+          question: question
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Add bot response with AI advice
       const botResponse = {
         id: messages.length + 2,
         type: 'bot',
-        text: 'I understand your question about your portfolio. Based on your current holdings, I recommend reviewing your asset allocation and considering diversification strategies.',
+        text: data.advice,
         timestamp: new Date().toLocaleTimeString()
       };
       setMessages(prev => [...prev, botResponse]);
+    } catch (err) {
+      console.error('Error getting AI advice:', err);
+      setError(err.message);
+
+      // Add error message to chat
+      const errorMessage = {
+        id: messages.length + 2,
+        type: 'bot',
+        text: `Sorry, I encountered an error: ${err.message}. Please try again.`,
+        timestamp: new Date().toLocaleTimeString(),
+        isError: true
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -62,6 +97,8 @@ function AdvisorChat() {
               className={`max-w-xs px-4 py-2 rounded-lg ${
                 message.type === 'user'
                   ? 'bg-green-500 text-white'
+                  : message.isError
+                  ? 'bg-red-50 text-red-900 border border-red-200'
                   : 'bg-gray-100 text-gray-900'
               }`}
             >

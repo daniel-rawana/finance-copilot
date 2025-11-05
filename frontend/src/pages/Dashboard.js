@@ -309,7 +309,7 @@ function Dashboard() {
           </div>
 
           <div className="lg:col-span-1">
-            <AdvisorChat />
+            <AdvisorChat portfolioId={portfolio.id} />
           </div>
         </div>
       </main>
