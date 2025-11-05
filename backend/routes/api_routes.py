@@ -224,8 +224,15 @@ def get_advice():
         try:
             import os as _os
             api_key = _os.getenv('OPENAI_API_KEY')
+
+            # Log API key status for debugging
             if not api_key:
+                logger.warning("OPENAI_API_KEY is not set in environment")
                 raise RuntimeError('OPENAI_API_KEY not set')
+            else:
+                # Log first 10 characters to verify key is loaded
+                logger.info(f"OPENAI_API_KEY loaded successfully. First 10 chars: {api_key[:10]}...")
+                logger.info(f"API key length: {len(api_key)} characters")
 
             try:
                 import openai
