@@ -5,6 +5,7 @@ from werkzeug.utils import secure_filename
 from utils.csv_parser import parse_portfolio_csv
 from utils.database import insert_portfolio, insert_holdings, get_portfolio_by_id, get_holdings_by_portfolio, get_portfolio_summary
 from utils.file_utils import allowed_file
+from utils.advisor_prompt import generate_advisor_prompt
 
 from utils.finance_functions import (
     get_total_unrealized_gain_loss,
@@ -264,6 +265,96 @@ def health_check():
             "status": "unhealthy",
             "error": str(e)
         }), 500
+
+@api_bp.route("/advice", methods=['POST'])
+def get_advice():
+    """
+    Generate investment advice using portfolio data and a user question.
+    Expects JSON body: { "portfolio_id": int, "question": string }
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        portfolio_id = payload.get('portfolio_id')
+        question = (payload.get('question') or '').strip()
+
+        if not portfolio_id or not isinstance(portfolio_id, int):
+            logger.warning("/advice called without valid portfolio_id")
+            return jsonify({"advice": None, "error": "Invalid or missing portfolio_id"}), 400
+
+        if not question:
+            logger.warning("/advice called without question")
+            return jsonify({"advice": None, "error": "Question is required"}), 400
+
+        # Fetch portfolio and holdings
+        portfolio = get_portfolio_by_id(portfolio_id)
+        if not portfolio:
+            logger.warning(f"Portfolio {portfolio_id} not found for advice")
+            return jsonify({"advice": None, "error": "Portfolio not found"}), 404
+
+        holdings_rows = get_holdings_by_portfolio(portfolio_id)
+
+        # Map DB rows to advisor prompt holdings schema
+        holdings = []
+        for h in holdings_rows:
+            shares = h.get('shares') or 0
+            purchase_price = h.get('purchase_price') or 0
+            current_value = h.get('current_value') if 'current_value' in h else (shares * purchase_price)
+            holdings.append({
+                'ticker': h.get('ticker'),
+                'shares': shares,
+                'purchase_price': purchase_price,
+                'current_value': current_value,
+                'gain_loss': None,
+                'sector': h.get('sector') if 'sector' in h else None,
+            })
+
+        portfolio_data = { 'holdings': holdings }
+
+        prompt = generate_advisor_prompt(portfolio_data, question)
+
+        # Call OpenAI API (fallback to simulated response if not configured)
+        advice_text = None
+        openai_error = None
+        try:
+            import os as _os
+            api_key = _os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise RuntimeError('OPENAI_API_KEY not set')
+
+            try:
+                import openai
+                openai.api_key = api_key
+                # Prefer ChatCompletion; fallback handled by exception
+                chat = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful financial investment advisor. Provide clear, concise, and prudent guidance."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                )
+                advice_text = chat.choices[0].message["content"].strip()
+            except Exception as oe:
+                openai_error = str(oe)
+                logger.warning(f"OpenAI API call failed: {openai_error}")
+        except Exception as cfg_e:
+            openai_error = str(cfg_e)
+            logger.info(f"OpenAI not configured, using simulated advice: {openai_error}")
+
+        if not advice_text:
+            # Simulated lightweight advisor response using the generated prompt context
+            advice_text = (
+                "This is a simulated advisory response. "
+                "Key points from your portfolio were summarized, and prudent, diversified investing, risk tolerance alignment, "
+                "and periodic rebalancing are recommended. "
+                f"Prompt context: {prompt}"
+            )
+
+        return jsonify({"advice": advice_text, "error": None}), 200
+
+    except Exception as e:
+        logger.error(f"Advice generation failed: {str(e)}")
+        return jsonify({"advice": None, "error": f"Advice generation failed: {str(e)}"}), 500
 
 @api_bp.errorhandler(413)
 def too_large(e):
